@@ -116,8 +116,13 @@ data "aws_iam_policy_document" "ci_deploy" {
   }
 }
 
-resource "aws_iam_user_policy" "ci_deploy" {
+resource "aws_iam_policy" "ci_deploy" {
   name   = "${var.project_name}-ci-deploy"
-  user   = aws_iam_user.ci_deploy.name
   policy = data.aws_iam_policy_document.ci_deploy.json
+  tags   = local.tags
+}
+
+resource "aws_iam_user_policy_attachment" "ci_deploy" {
+  user       = aws_iam_user.ci_deploy.name
+  policy_arn = aws_iam_policy.ci_deploy.arn
 }
