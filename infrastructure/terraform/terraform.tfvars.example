@@ -1,0 +1,4 @@
+region       = "eu-central-1"
+project_name = "neupokoevcv"
+domain_name  = "neupokoev.cv"
+extra_tags   = {}
