@@ -16,6 +16,30 @@ resource "aws_iam_access_key" "ci_deploy" {
 # user), before those other resources can safely exist (ACM validation
 # needs the zone's nameservers to be live at the registrar first).
 data "aws_iam_policy_document" "ci_deploy" {
+  # The AWS provider reads back a resource's full state (tags, attached
+  # policies, access keys, etc.) on every plan/apply, not just when mutating
+  # it -- so the CI user needs read access to its own IAM identity/policy.
+  statement {
+    sid    = "ManageOwnIamIdentity"
+    effect = "Allow"
+    actions = [
+      "iam:GetUser",
+      "iam:ListUserTags",
+      "iam:ListAccessKeys",
+      "iam:GetAccessKeyLastUsed",
+      "iam:ListAttachedUserPolicies",
+      "iam:ListUserPolicies",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:user/${var.project_name}-ci-deploy"]
+  }
+
+  statement {
+    sid       = "ManageOwnIamPolicy"
+    effect    = "Allow"
+    actions   = ["iam:GetPolicy", "iam:GetPolicyVersion", "iam:ListPolicyVersions"]
+    resources = ["arn:aws:iam::${local.account_id}:policy/${var.project_name}-ci-deploy"]
+  }
+
   statement {
     sid     = "TerraformStateBucket"
     effect  = "Allow"
@@ -41,6 +65,7 @@ data "aws_iam_policy_document" "ci_deploy" {
       "route53:ChangeResourceRecordSets",
       "route53:ListResourceRecordSets",
       "route53:GetChange",
+      "route53:ListTagsForResource",
     ]
     resources = ["arn:aws:route53:::hostedzone/${aws_route53_zone.main.zone_id}", "arn:aws:route53:::change/*"]
   }
@@ -61,8 +86,10 @@ data "aws_iam_policy_document" "ci_deploy" {
     actions = [
       "acm:RequestCertificate",
       "acm:DescribeCertificate",
+      "acm:GetCertificate",
       "acm:DeleteCertificate",
       "acm:AddTagsToCertificate",
+      "acm:RemoveTagsFromCertificate",
       "acm:ListTagsForCertificate",
     ]
     resources = ["*"]
@@ -76,39 +103,32 @@ data "aws_iam_policy_document" "ci_deploy" {
     actions = [
       "cloudfront:CreateDistribution",
       "cloudfront:GetDistribution",
+      "cloudfront:GetDistributionConfig",
       "cloudfront:UpdateDistribution",
       "cloudfront:DeleteDistribution",
       "cloudfront:TagResource",
+      "cloudfront:UntagResource",
       "cloudfront:ListTagsForResource",
       "cloudfront:CreateOriginAccessControl",
       "cloudfront:GetOriginAccessControl",
+      "cloudfront:GetOriginAccessControlConfig",
       "cloudfront:UpdateOriginAccessControl",
       "cloudfront:DeleteOriginAccessControl",
       "cloudfront:CreateInvalidation",
       "cloudfront:GetInvalidation",
+      "cloudfront:ListInvalidations",
     ]
     resources = ["*"]
   }
 
+  # Full S3 access, but scoped to exactly this one bucket -- covers bucket
+  # lifecycle management (create/delete/policy/versioning/encryption/PAB)
+  # plus routine object read/write, without enumerating every sub-resource
+  # read action the provider's refresh touches (ACL, tagging, CORS, etc.).
   statement {
-    sid    = "SiteBucketLifecycle"
-    effect = "Allow"
-    actions = [
-      "s3:CreateBucket",
-      "s3:DeleteBucket",
-      "s3:PutBucketPolicy",
-      "s3:GetBucketPolicy",
-      "s3:PutBucketVersioning",
-      "s3:GetBucketVersioning",
-      "s3:PutBucketPublicAccessBlock",
-      "s3:GetBucketPublicAccessBlock",
-      "s3:PutEncryptionConfiguration",
-      "s3:GetEncryptionConfiguration",
-      "s3:PutObject",
-      "s3:GetObject",
-      "s3:DeleteObject",
-      "s3:ListBucket",
-    ]
+    sid     = "SiteBucketFullAccess"
+    effect  = "Allow"
+    actions = ["s3:*"]
     resources = [
       "arn:aws:s3:::${local.site_bucket_name}",
       "arn:aws:s3:::${local.site_bucket_name}/*",
